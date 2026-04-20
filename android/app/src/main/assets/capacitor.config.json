@@ -1,0 +1,20 @@
+{
+	"appId": "ma.mescomptes.app",
+	"appName": "محاسبي",
+	"webDir": "dist",
+	"server": {
+		"androidScheme": "https"
+	},
+	"android": {
+		"backgroundColor": "#F7F2E7",
+		"allowMixedContent": true
+	},
+	"plugins": {
+		"SplashScreen": {
+			"launchShowDuration": 1000,
+			"backgroundColor": "#0E4D3A",
+			"androidSplashResourceName": "splash",
+			"showSpinner": false
+		}
+	}
+}
