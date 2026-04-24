@@ -1,29 +1,103 @@
-# دليل الحصول على APK بدون Android Studio
+# محاسبي – Mes Comptes
+## دليل بناء تطبيق APK
 
-## الخطوات (5 دقائق فقط)
+---
 
-### 1. أنشئ حساباً مجانياً على GitHub
-- اذهب إلى: https://github.com/signup
-- سجّل بأي بريد إلكتروني — اختر الخطة المجانية (Free)
+## ما تحتاجه (مرة واحدة فقط)
 
-### 2. أنشئ مستودعاً جديداً
-- بعد تسجيل الدخول، انقر الزر الأخضر "New"
-- الاسم: mes-comptes | اتركه Public | انقر "Create repository"
+### 1. Node.js
+- اذهب إلى: https://nodejs.org
+- حمّل النسخة LTS وثبّتها
 
-### 3. ارفع الملفات
-- في صفحة المستودع الجديد، انقر "uploading an existing file"
-- اسحب كل محتويات هذا المجلد إلى المتصفح
-- انقر "Commit changes"
+### 2. Android Studio
+- اذهب إلى: https://developer.android.com/studio
+- حمّل وثبّت Android Studio
+- عند التثبيت، تأكد من تحديد **Android SDK** و **Android Virtual Device**
 
-### 4. انتظر دقيقتين
-- انقر تبويب "Actions" في أعلى الصفحة
-- دائرة صفراء = يبني | دائرة خضراء = انتهى ✅
+---
 
-### 5. حمّل APK
-- انقر على السطر الأخضر
-- في قسم "Artifacts" انقر "mes-comptes-apk"
-- فك الضغط — ستجد app-debug.apk
+## خطوات بناء APK
 
-### 6. ثبّت على هاتفك
-- انقل الملف للهاتف (واتساب أو USB)
-- افتح الملف، اقبل تثبيت المصادر غير المعروفة، وثبّت ✅
+### الخطوة 1 — افتح Terminal (أو Command Prompt في Windows)
+اذهب إلى مجلد المشروع:
+```
+cd mes-comptes
+```
+
+### الخطوة 2 — ثبّت الحزم (مرة واحدة فقط)
+```
+npm install
+```
+
+### الخطوة 3 — ابنِ التطبيق وزامنه مع Android
+```
+npm run build
+npx cap sync android
+```
+
+### الخطوة 4 — افتح Android Studio
+```
+npx cap open android
+```
+
+### الخطوة 5 — في Android Studio
+1. انتظر حتى تنتهي مزامنة Gradle (شريط التقدم في الأسفل)
+2. من القائمة: **Build → Build Bundle(s) / APK(s) → Build APK(s)**
+3. انتظر قليلاً
+4. سيظهر إشعار "APK(s) generated" → انقر **locate**
+5. ملف APK موجود في:
+   ```
+   android/app/build/outputs/apk/debug/app-debug.apk
+   ```
+
+### الخطوة 6 — نقل APK إلى الهاتف
+- انسخ الملف إلى هاتفك عبر USB أو أرسله واتساب لنفسك
+- افتح الملف على الهاتف لتثبيته
+- ⚠️ قد يطلب منك تفعيل "تثبيت من مصادر غير معروفة" في الإعدادات
+
+---
+
+## إذا أردت تغيير أي شيء في التطبيق
+1. عدّل ملف `src/App.jsx`
+2. أعِد تشغيل:
+   ```
+   npm run build
+   npx cap sync android
+   ```
+3. في Android Studio: **Build → Build APK(s)**
+
+---
+
+## هيكل المشروع
+```
+mes-comptes/
+├── src/
+│   ├── App.jsx          ← كود التطبيق كاملاً (هنا تعدّل)
+│   └── main.jsx         ← نقطة الدخول
+├── android/             ← مشروع Android (لا تعدّله يدوياً)
+├── public/
+│   ├── manifest.json    ← إعدادات PWA
+│   └── sw.js            ← Service Worker
+├── capacitor.config.json← إعدادات Capacitor
+├── package.json
+└── vite.config.js
+```
+
+---
+
+## مشاكل شائعة
+
+**خطأ JAVA_HOME:**
+Android Studio يحتاج Java — عادةً يثبّته تلقائياً.
+إذا ظهر خطأ، افتح Android Studio أولاً وأكمل الإعداد.
+
+**Gradle sync failed:**
+في Android Studio: **File → Sync Project with Gradle Files**
+
+**"تثبيت التطبيقات غير معروفة المصدر":**
+اذهب إلى إعدادات الهاتف → الأمان → فعّل "السماح بمصادر غير معروفة"
+(أو ابحث عن "install unknown apps" في الإعدادات)
+
+---
+
+صُنع بالمغرب · Fait au Maroc 🇲🇦

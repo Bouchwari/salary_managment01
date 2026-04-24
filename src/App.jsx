@@ -73,7 +73,7 @@ export const T = {
     noTemplates:'لا اختصارات بعد',
     addTemplateHint:'احفظ عملياتك المتكررة لإضافتها بنقرة',
     saveAsTemplate:'حفظ كاختصار سريع', quickAdd:'اختصارات',
-    templateName:'الاسم',
+    templateName:'الوصف',
     // Recurring (= fixed costs)
     recurring:'المصاريف الدورية', manageRecurring:'إدارة الدورية',
     makeRecurring:'جعلها دورية', dayOfMonth:'يوم من الشهر',
@@ -103,10 +103,6 @@ export const T = {
     projection:'توقع نهاية الشهر', projectionAt:'إذا استمريت بنفس الوتيرة',
     // Misc
     manage:'إدارة', theme:'السمة', darkMode:'داكن', lightMode:'فاتح',
-    // Savings routine
-    savingsContrib:'ادخار', linkToGoal:'أضف لهدف ادخار؟',
-    linkGoalHint:'اختر هدفاً لإضافة هذا المبلغ إليه تلقائياً',
-    skipLink:'تخطي', noGoalsYet:'لا أهداف بعد — أنشئ هدفاً أولاً',
   },
   fr: {
     appName:'Mes Comptes', tagline:'Mes dépenses quotidiennes',
@@ -156,7 +152,7 @@ export const T = {
     noTemplates:'Aucun modèle',
     addTemplateHint:'Enregistrez vos opérations fréquentes',
     saveAsTemplate:"L'enregistrer comme modèle rapide", quickAdd:'Raccourcis',
-    templateName:'Nom',
+    templateName:'Description',
     recurring:'Charges récurrentes', manageRecurring:'Gérer les récurrences',
     makeRecurring:'Rendre récurrent', dayOfMonth:'Jour du mois',
     pendingRecurring:'Récurrences en attente',
@@ -181,10 +177,6 @@ export const T = {
     ruleSavingsHint:"20% pour l'épargne", ruleTarget:'Cible', ruleActual:'Réel',
     projection:'Projection fin de mois', projectionAt:'À ce rythme',
     manage:'Gérer', theme:'Thème', darkMode:'Sombre', lightMode:'Clair',
-    // Savings routine
-    savingsContrib:'Épargne', linkToGoal:'Ajouter à un objectif ?',
-    linkGoalHint:"Choisir l'objectif à créditer automatiquement",
-    skipLink:'Ignorer', noGoalsYet:"Aucun objectif — créez-en un d'abord",
   },
 };
 
@@ -197,7 +189,6 @@ export const CATEGORIES = [
   {id:'leisure',  type:'expense', ar:'ترفيه',   fr:'Loisirs',      icon:Music,        color:'#7C3AED', rule:'wants'},
   {id:'education',type:'expense', ar:'تعليم',   fr:'Éducation',    icon:BookOpen,     color:'#1D4ED8', rule:'needs'},
   {id:'shopping', type:'expense', ar:'تسوق',    fr:'Shopping',     icon:ShoppingBag,  color:'#BE185D', rule:'wants'},
-  {id:'savings',  type:'expense', ar:'ادخار',   fr:'Épargne',      icon:PiggyBank,    color:'#B8893D', rule:'savings'},
   {id:'other',    type:'expense', ar:'أخرى',    fr:'Autres',       icon:Package,      color:'#78716C', rule:'wants'},
   {id:'salary',   type:'income',  ar:'راتب',    fr:'Salaire',      icon:Briefcase,    color:'#0E4D3A'},
   {id:'freelance',type:'income',  ar:'عمل حر',  fr:'Indépendant',  icon:Laptop,       color:'#0369A1'},
@@ -215,9 +206,42 @@ export const GOAL_ICONS = {
   other:    {icon:Target,        color:'#7C3AED'},
 };
 
-export const getCat = (id) => CATEGORIES.find(c => c.id === id) ?? CATEGORIES[7];
-export const expenseCats = () => CATEGORIES.filter(c => c.type === 'expense');
-export const incomeCats  = () => CATEGORIES.filter(c => c.type === 'income');
+// ── Custom category infrastructure ───────────────────────
+// Icons available for user-created categories
+export const ICON_MAP = {
+  Utensils, Car, Home, Music, BookOpen, HeartPulse,
+  ShoppingBag, Package, Briefcase, Laptop, Gift, PiggyBank,
+  Target, Zap, Building2, GraduationCap, Plane, Moon,
+  Shield, Sparkles, Clock, TrendingUp, Repeat, Wallet,
+};
+
+export const CUSTOM_COLORS = [
+  '#C1440E','#0E4D3A','#B8893D','#7C3AED','#1D4ED8',
+  '#BE185D','#0369A1','#B91C1C','#334155','#78716C',
+  '#059669','#D97706','#7E22CE','#0E7490',
+];
+
+// Module-level registry — updated synchronously by App before each render
+let _customCats = [];
+const registerCustomCats = (cats) => { _customCats = cats; };
+const customCatToFull = (c) => ({
+  ...c, ar: c.label, fr: c.label,
+  icon: ICON_MAP[c.iconName] ?? Package,
+});
+
+export const getCat = (id) => {
+  const custom = _customCats.find(c => c.id === id);
+  if (custom) return customCatToFull(custom);
+  return CATEGORIES.find(c => c.id === id) ?? CATEGORIES[7];
+};
+export const expenseCats = () => [
+  ...CATEGORIES.filter(c => c.type === 'expense'),
+  ..._customCats.filter(c => c.type === 'expense').map(customCatToFull),
+];
+export const incomeCats = () => [
+  ...CATEGORIES.filter(c => c.type === 'income'),
+  ..._customCats.filter(c => c.type === 'income').map(customCatToFull),
+];
 
 // ── Domain: Entry (Ledger) ────────────────────────────────
 /**
@@ -372,12 +396,10 @@ export const FinancialProfile = {
  * Goal = { id, name, iconId, target, saved, targetDate? }
  */
 export const Goal = {
-  // Coerce saved to Number everywhere — localStorage can return strings
-  make: (fields) => ({ ...fields, id: fields.id ?? uid('g'), saved: Number(fields.saved) || 0 }),
-  progress: (goal) => goal.target > 0 ? Math.min((Number(goal.saved) || 0) / goal.target * 100, 100) : 0,
-  remaining: (goal) => Math.max(0, goal.target - (Number(goal.saved) || 0)),
-  // BUG FIX: Number() prevents "100" + (-50) = "100-50" string concat
-  adjust: (goal, delta) => ({ ...goal, saved: Math.max(0, (Number(goal.saved) || 0) + delta) }),
+  make: (fields) => ({ ...fields, id: fields.id ?? uid('g'), saved: fields.saved ?? 0 }),
+  progress: (goal) => goal.target > 0 ? Math.min((goal.saved / goal.target) * 100, 100) : 0,
+  remaining: (goal) => Math.max(0, goal.target - (goal.saved ?? 0)),
+  adjust: (goal, delta) => ({ ...goal, saved: Math.max(0, (goal.saved ?? 0) + delta) }),
 };
 
 // ════════════════════════════════════════════════════════════
@@ -395,7 +417,8 @@ const STORAGE_KEYS = {
   recurring: 'mca:recurring',
   theme:     'mca:theme',
   salary:    'mca:salary',
-  paydayDay: 'mca:payday',
+  paydayDay:  'mca:payday',
+  customCats: 'mca:custom_cats',
 };
 
 const Storage = {
@@ -422,11 +445,9 @@ const mkKey = (m,y) => `${y}-${String(m+1).padStart(2,'0')}`;
 const fmtMAD = (n, lang) => {
   const v = Math.round((Math.abs(n) + 1e-10) * 100) / 100;
   try {
-    const s = v.toLocaleString(lang === 'ar' ? 'ar-MA' : 'fr-MA',
-      { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const s = v.toLocaleString(lang === 'ar' ? 'ar-MA' : 'fr-MA', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     return lang === 'ar' ? `${s} د.م.` : `${s} DH`;
   } catch {
-    // Fallback for Android devices missing the ar-MA locale
     return lang === 'ar' ? `${v.toFixed(2)} د.م.` : `${v.toFixed(2)} DH`;
   }
 };
@@ -477,12 +498,12 @@ export default function App() {
   const [templates, setTemplates] = useState([]);
   const [recurring, setRecurring] = useState([]);
   const [salary,    setSalary]    = useState(0);
-  const [paydayDay, setPaydayDay] = useState(0);
+  const [paydayDay,  setPaydayDay]  = useState(0);
+  const [customCats, setCustomCats] = useState([]);
   const [loaded,    setLoaded]    = useState(false);
   const [editingEntry,  setEditingEntry]  = useState(null);
   const [prefillEntry,  setPrefillEntry]  = useState(null);
   const [confirmAction, setConfirmAction] = useState(null);
-  const [pendingGoalLink, setPendingGoalLink] = useState(null); // {amount} triggers goal-link modal
   const [filterCat,   setFilterCat]  = useState('all');
   const [filterType,  setFilterType] = useState('all');
   const [viewMonth, setViewMonth] = useState(() => {
@@ -505,22 +526,23 @@ export default function App() {
   // ── Load all state from storage ──
   useEffect(() => {
     (async () => {
-      const [en, bg, lg, gl, tpl, rc, th, sal, pd] = await Promise.all([
-        Storage.load(STORAGE_KEYS.entries,   []),
-        Storage.load(STORAGE_KEYS.budgets,   {}),
-        Storage.load(STORAGE_KEYS.lang,      'ar'),
-        Storage.load(STORAGE_KEYS.goals,     []),
-        Storage.load(STORAGE_KEYS.templates, []),
-        Storage.load(STORAGE_KEYS.recurring, []),
-        Storage.load(STORAGE_KEYS.theme,     'light'),
-        Storage.load(STORAGE_KEYS.salary,    0),
-        Storage.load(STORAGE_KEYS.paydayDay, 0),
+      const [en, bg, lg, gl, tpl, rc, th, sal, pd, cc] = await Promise.all([
+        Storage.load(STORAGE_KEYS.entries,    []),
+        Storage.load(STORAGE_KEYS.budgets,    {}),
+        Storage.load(STORAGE_KEYS.lang,       'ar'),
+        Storage.load(STORAGE_KEYS.goals,      []),
+        Storage.load(STORAGE_KEYS.templates,  []),
+        Storage.load(STORAGE_KEYS.recurring,  []),
+        Storage.load(STORAGE_KEYS.theme,      'light'),
+        Storage.load(STORAGE_KEYS.salary,     0),
+        Storage.load(STORAGE_KEYS.paydayDay,  0),
+        Storage.load(STORAGE_KEYS.customCats, []),
       ]);
       // migrate old entries missing `type`
-      setEntries(en.map(e => ({ ...e, type: e.type ?? 'expense', amount: Number(e.amount) || 0 })));
-      setBudgets(bg); setLang(lg); setGoals(gl.map(g => Goal.make(g)));
-      setTemplates(tpl); setRecurring(rc.map(r => ({ ...r, amount: Number(r.amount) || 0 })));
-      setTheme(th); setSalary(Number(sal) || 0); setPaydayDay(Number(pd) || 0);
+      setEntries(en.map(e => ({ ...e, type: e.type ?? 'expense' })));
+      setBudgets(bg); setLang(lg); setGoals(gl); setTemplates(tpl);
+      setRecurring(rc); setTheme(th); setSalary(sal); setPaydayDay(pd);
+      setCustomCats(cc);
       setLoaded(true);
     })();
   }, []);
@@ -534,7 +556,8 @@ export default function App() {
   useEffect(() => { if (loaded) Storage.save(STORAGE_KEYS.recurring, recurring); }, [recurring, loaded]);
   useEffect(() => { if (loaded) Storage.save(STORAGE_KEYS.theme,     theme);     }, [theme, loaded]);
   useEffect(() => { if (loaded) Storage.save(STORAGE_KEYS.salary,    salary);    }, [salary, loaded]);
-  useEffect(() => { if (loaded) Storage.save(STORAGE_KEYS.paydayDay, paydayDay); }, [paydayDay, loaded]);
+  useEffect(() => { if (loaded) Storage.save(STORAGE_KEYS.paydayDay,  paydayDay);  }, [paydayDay,  loaded]);
+  useEffect(() => { if (loaded) Storage.save(STORAGE_KEYS.customCats, customCats); }, [customCats, loaded]);
 
   // ── Derived state (domain queries) ──
   const now = new Date();
@@ -581,36 +604,28 @@ export default function App() {
 
   // ── Application use-cases (commands) ──
   const addOrUpdateEntry = useCallback((data) => {
-    const entry = Entry.make({ ...data, id: editingEntry?.id ?? uid('e') });
+    const { _rec, saveTemplate, ...entryFields } = data;
+    const entry = Entry.make({ ...entryFields, id: editingEntry?.id ?? uid('e') });
     setEntries(prev => {
       const rest = editingEntry ? prev.filter(x => x.id !== editingEntry.id) : prev;
       return [entry, ...rest];
     });
-
-    // BUG FIX: was previously never processed — makeRecurring checkbox was silently dead
-    if (data._rec && !editingEntry) {
-      const newRec = Recurring.make({
-        category: data.category,
-        amount:   Number(data.amount),
-        note:     data.note || '',
-        dayOfMonth: data._rec.dayOfMonth,
-      });
-      setRecurring(prev => [...prev, newRec]);
-    }
-
-    if (data.saveTemplate && data.note) {
+    if (saveTemplate && data.note) {
       setTemplates(prev => [
         { id: uid('t'), name: data.note, type: data.type, category: data.category, amount: parseFloat(data.amount), note: data.note },
         ...prev,
       ].slice(0, 50));
     }
-    setEditingEntry(null); setPrefillEntry(null); setTab('home');
-
-    // NEW: when user logs a savings entry, prompt them to credit a goal
-    if (entry.category === 'savings' && goals.length > 0) {
-      setPendingGoalLink({ amount: Number(data.amount) });
+    if (_rec && !editingEntry) {
+      setRecurring(prev => [...prev, Recurring.make({
+        category: data.category,
+        amount: parseFloat(data.amount),
+        note: data.note || '',
+        dayOfMonth: _rec.dayOfMonth,
+      })]);
     }
-  }, [editingEntry, goals]);
+    setEditingEntry(null); setPrefillEntry(null); setTab('home');
+  }, [editingEntry]);
 
   const deleteEntry = useCallback((id) => {
     setEntries(prev => prev.filter(e => e.id !== id));
@@ -681,8 +696,15 @@ export default function App() {
     r.readAsText(file);
   }, []);
 
+  const addCustomCat = useCallback((cat) => {
+    setCustomCats(prev => [...prev, cat]);
+  }, []);
+
   const shiftMonth = (d) => setViewMonth(prev => { const dt = new Date(prev.year, prev.month + d, 1); return { month: dt.getMonth(), year: dt.getFullYear() }; });
   const jumpToNow  = () => { const d = new Date(); setViewMonth({ month: d.getMonth(), year: d.getFullYear() }); };
+
+  // Sync custom cats to module-level registry before children render
+  registerCustomCats(customCats);
 
   // ── Rendering ──
   if (!loaded) return (
@@ -698,7 +720,7 @@ export default function App() {
 
   // ── Sub-views ──
   if (subView === 'goals')
-    return <Shell {...ctx} theme={theme}><GoalsView {...ctx} goals={goals} onBack={() => setSubView(null)} onSave={upsertGoal} onAdjust={adjustGoalSaved} onDelete={id => setConfirmAction({ type:'deleteGoal', id })} /></Shell>;
+    return <Shell {...ctx} theme={theme}><GoalsView {...ctx} goals={goals} onBack={() => setSubView(null)} onSave={upsertGoal} onAdjust={adjustGoalSaved} onDelete={deleteGoal} /></Shell>;
 
   if (subView === 'templates')
     return <Shell {...ctx} theme={theme}><TemplatesView {...ctx} templates={templates} setTemplates={setTemplates} onBack={() => setSubView(null)} onUse={useTemplate} /></Shell>;
@@ -726,7 +748,7 @@ export default function App() {
       </header>
 
       {/* ── Main content ── */}
-      <main className="px-5 max-w-2xl mx-auto" style={{ paddingBottom: "calc(env(safe-area-inset-bottom, 0px) + 7rem)" }}>
+      <main className="px-5 max-w-2xl mx-auto" style={{ paddingBottom:'calc(env(safe-area-inset-bottom, 0px) + 7rem)' }}>
         {tab === 'home' && (
           <HomeView {...ctx}
             viewMonth={viewMonth} isCurrentMonth={isCurrentMonth}
@@ -751,6 +773,8 @@ export default function App() {
             onUseTemplate={useTemplate}
             onSave={addOrUpdateEntry}
             onCancel={() => { setEditingEntry(null); setPrefillEntry(null); setTab('home'); }}
+            customCats={customCats}
+            onAddCat={addCustomCat}
           />
         )}
         {tab === 'list' && (
@@ -810,14 +834,6 @@ export default function App() {
         />
       )}
 
-      {/* NEW: Savings goal-link modal */}
-      {pendingGoalLink && (
-        <GoalLinkModal {...ctx} goals={goals} amount={pendingGoalLink.amount}
-          onLink={(goalId, amount) => { adjustGoalSaved(goalId, amount); setPendingGoalLink(null); }}
-          onSkip={() => setPendingGoalLink(null)}
-        />
-      )}
-
       {/* ── Bottom nav ── */}
       <BottomNav {...ctx} tab={tab} setTab={setTab}
         onAdd={() => { setEditingEntry(null); setPrefillEntry(null); setTab('add'); }} />
@@ -835,7 +851,7 @@ export default function App() {
 function Shell({ tokens, isRTL, theme, children }) {
   const tk = tokens;
   return (
-    <div dir={isRTL ? 'rtl' : 'ltr'}
+    <div dir={isRTL ? 'rtl' : 'ltr'} className="w-full"
       style={{
         minHeight: '100dvh',
         background: tk.BG, color: tk.INK, fontFamily: tk.fontB,
@@ -843,11 +859,12 @@ function Shell({ tokens, isRTL, theme, children }) {
           ? `radial-gradient(circle at 20% 0%,${tk.EMERALD}18 0%,transparent 50%),radial-gradient(circle at 100% 100%,${tk.GOLD}10 0%,transparent 40%)`
           : `radial-gradient(circle at 20% 0%,${tk.BG_DEEP}55 0%,transparent 45%)`,
       }}>
-      {/* Zellige stripe — includes safe-area-inset-top so it fills behind the status bar */}
+      {/* Zellige stripe — extends up into the status bar safe area */}
       <div className="w-full" style={{
-        height: 'calc(env(safe-area-inset-top, 0px) + 6px)',
         background: `repeating-linear-gradient(90deg,${tk.EMERALD} 0 14px,${tk.GOLD} 14px 18px,${tk.TERRA} 18px 22px,${tk.GOLD} 22px 26px,${tk.EMERALD} 26px 40px)`,
         opacity: 0.9,
+        paddingTop: 'env(safe-area-inset-top, 0px)',
+        minHeight: 'calc(env(safe-area-inset-top, 0px) + 6px)',
       }} />
       {children}
     </div>
@@ -867,10 +884,7 @@ function BottomNav({ tr, tokens, tab, setTab, onAdd }) {
   const tk = tokens;
   return (
     <nav className="fixed bottom-0 start-0 end-0 z-40 px-3 pt-2"
-      style={{
-        paddingBottom: 'max(env(safe-area-inset-bottom, 0px), 12px)',
-        background:`linear-gradient(to top,${tk.BG} 70%,transparent)`,
-      }}>
+      style={{ background:`linear-gradient(to top,${tk.BG} 70%,transparent)`, paddingBottom:'max(env(safe-area-inset-bottom, 0px), 12px)' }}>
       <div className="max-w-2xl mx-auto rounded-2xl px-2 py-2 flex items-center justify-between"
         style={{ background:tk.SURFACE, border:`1px solid ${tk.BORDER}`, boxShadow:`0 8px 28px ${tk.EMERALD}18` }}>
         {[
@@ -1142,7 +1156,7 @@ function EntryRow({ entry, lang, tr, tokens, onClick }) {
 }
 
 // ── Entry Form ────────────────────────────────────────────
-function EntryForm({ tr, lang, isRTL, tokens, initial, templates, onUseTemplate, onSave, onCancel }) {
+function EntryForm({ tr, lang, isRTL, tokens, initial, templates, onUseTemplate, onSave, onCancel, customCats=[], onAddCat }) {
   const tk=tokens;
   const [type,         setType]        = useState(initial?.type??'expense');
   const [amount,       setAmount]      = useState(initial?.amount?.toString()??'');
@@ -1152,6 +1166,7 @@ function EntryForm({ tr, lang, isRTL, tokens, initial, templates, onUseTemplate,
   const [saveTemplate, setSaveTemplate]= useState(false);
   const [makeRecurring,setMakeRecurring]=useState(false);
   const [dom,          setDom]         = useState(1);
+  const [showCatModal, setShowCatModal]= useState(false);
 
   const cats    = type==='expense' ? expenseCats() : incomeCats();
   const canSave = amount && parseFloat(amount)>0 && category && cats.find(c=>c.id===category);
@@ -1211,8 +1226,24 @@ function EntryForm({ tr, lang, isRTL, tokens, initial, templates, onUseTemplate,
               <span className="text-[10px] font-semibold text-center leading-tight">{lang==='ar'?c.ar:c.fr}</span>
             </button>
           );})}
+          {/* Add custom category tile */}
+          {!isEdit && (
+            <button onClick={()=>setShowCatModal(true)} className="p-3 rounded-xl flex flex-col items-center gap-1.5"
+              style={{ background:tk.SURFACE, border:`1.5px dashed ${tk.BORDER}`, color:tk.MUTED }}>
+              <Plus className="w-5 h-5"/>
+              <span className="text-[10px] font-semibold text-center leading-tight">{lang==='ar'?'جديدة':'Créer'}</span>
+            </button>
+          )}
         </div>
       </div>
+
+      {/* Custom category modal */}
+      {showCatModal && (
+        <CustomCatModal tr={tr} lang={lang} isRTL={isRTL} tokens={tokens} type={type}
+          onCancel={()=>setShowCatModal(false)}
+          onSave={cat=>{ onAddCat?.(cat); setCategory(cat.id); setShowCatModal(false); }}
+        />
+      )}
 
       {/* Date + note */}
       <div className="rounded-2xl p-4 space-y-3" style={{ background:tk.SURFACE, border:`1px solid ${tk.BORDER}` }}>
@@ -1300,15 +1331,10 @@ function ListView({ tr, lang, isRTL, tokens, entries, filterCat, setFilterCat, f
               <div className="space-y-2">
                 {items.map(e=>(
                   <div key={e.id} className="flex items-center gap-2">
-                    <div className="flex-1 min-w-0" onClick={()=>onEdit(e)} style={{ cursor:'pointer' }}>
-                      <EntryRow entry={e} lang={lang} tr={tr} tokens={tokens}/>
+                    <div className="flex-1 min-w-0" onClick={()=>onEdit(e)}>
+                      <EntryRow entry={e} lang={lang} tr={tr} tokens={tokens} onClick={()=>onEdit(e)}/>
                     </div>
-                    {/* BUG FIX: always visible — group-hover invisible on touchscreen */}
-                    <button onClick={()=>onDelete(e.id)}
-                      className="flex-shrink-0 p-2.5 rounded-xl"
-                      style={{ background:tk.WARN, color:tk.TERRA, minWidth:40, minHeight:40 }}>
-                      <Trash2 className="w-4 h-4"/>
-                    </button>
+                    <button onClick={()=>onDelete(e.id)} className="flex-shrink-0 flex items-center justify-center rounded-xl" style={{ background:tk.WARN, color:tk.TERRA, width:'40px', height:'40px', minWidth:'40px' }}><Trash2 className="w-3.5 h-3.5"/></button>
                   </div>
                 ))}
               </div>
@@ -1645,8 +1671,6 @@ function GoalsView({ tr, lang, isRTL, tokens, goals, onBack, onSave, onAdjust, o
   const tk=tokens;
   const [editing, setEditing]=useState(null);
   const [adjusting, setAdjusting]=useState(null);
-  // BUG FIX: GoalsView is an early-return subView. The Confirm modal in App never mounts
-  // here. We need a local confirm state instead of calling setConfirmAction on App.
   const [deletingId, setDeletingId]=useState(null);
   return (
     <>
@@ -1657,7 +1681,7 @@ function GoalsView({ tr, lang, isRTL, tokens, goals, onBack, onSave, onAdjust, o
           <button onClick={()=>setEditing('new')} className="p-2 rounded-full" style={{ background:tk.EMERALD, color:tk.ON_EMERALD }}><Plus className="w-4 h-4"/></button>
         </div>
       </header>
-      <main className="px-5 max-w-2xl mx-auto" style={{ paddingBottom: "calc(env(safe-area-inset-bottom, 0px) + 7rem)" }}>
+      <main className="px-5 max-w-2xl mx-auto" style={{ paddingBottom:'calc(env(safe-area-inset-bottom, 0px) + 7rem)' }}>
         {goals.length===0
           ? <div className="rounded-2xl p-8 text-center mt-6" style={{ background:tk.SURFACE, border:`1px dashed ${tk.BORDER}` }}><div className="mx-auto w-14 h-14 rounded-full flex items-center justify-center mb-3" style={{ background:tk.GOLD+'20' }}><PiggyBank className="w-6 h-6" style={{ color:tk.GOLD }}/></div><div className="text-sm font-semibold mb-1" style={{ color:tk.INK, fontFamily:tk.fontD }}>{tr.noGoals}</div><div className="text-xs mb-4" style={{ color:tk.MUTED }}>{tr.startGoal}</div><button onClick={()=>setEditing('new')} className="px-4 py-2 rounded-xl text-xs font-semibold" style={{ background:tk.EMERALD, color:tk.ON_EMERALD }}>+ {tr.newGoal}</button></div>
           : <div className="space-y-3">{goals.map(g=>{ const ic=GOAL_ICONS[g.iconId]??GOAL_ICONS.other; const Icon=ic.icon; const pct=Goal.progress(g); const complete=pct>=100; return (
@@ -1683,21 +1707,17 @@ function GoalsView({ tr, lang, isRTL, tokens, goals, onBack, onSave, onAdjust, o
       </main>
       {editing&&<GoalModal tr={tr} lang={lang} isRTL={isRTL} tokens={tokens} initial={editing==='new'?null:editing} onCancel={()=>setEditing(null)} onSave={g=>{onSave(g);setEditing(null);}}/>}
       {adjusting&&<AdjustModal tr={tr} lang={lang} tokens={tokens} mode={adjusting.mode} onCancel={()=>setAdjusting(null)} onConfirm={amt=>{onAdjust(adjusting.id,adjusting.mode==='deposit'?amt:-amt);setAdjusting(null);}}/>}
-      {/* BUG FIX: local confirm so delete works inside early-return subView */}
-      {deletingId&&<Confirm tokens={tokens} tr={tr} text={tr.confirmDelete} onCancel={()=>setDeletingId(null)} onConfirm={()=>{onDelete(deletingId);setDeletingId(null);}}/>}
+      {deletingId&&<Confirm tokens={tokens} text={tr.confirmDelete} tr={tr} onCancel={()=>setDeletingId(null)} onConfirm={()=>{onDelete(deletingId);setDeletingId(null);}}/>}
     </>
   );
 }
 
 function GoalModal({ tr, lang, isRTL, tokens, initial, onCancel, onSave }) {
   const tk=tokens;
-  const isEdit = !!initial?.id;
   const [name,       setName]      =useState(initial?.name??'');
   const [iconId,     setIconId]    =useState(initial?.iconId??'other');
   const [target,     setTarget]    =useState(initial?.target?.toString()??'');
-  // BUG FIX: when editing, saved is protected — only changeable via deposit/withdraw buttons
-  // Only editable at creation time (to enter existing savings)
-  const [initSaved,  setInitSaved] =useState(!isEdit ? (initial?.saved?.toString()??'0') : '');
+  const [saved,      setSaved]     =useState(initial?.saved?.toString()??'0');
   const [targetDate, setTargetDate]=useState(initial?.targetDate??'');
   const canSave=name.trim()&&parseFloat(target)>0;
   return (
@@ -1715,18 +1735,14 @@ function GoalModal({ tr, lang, isRTL, tokens, initial, onCancel, onSave }) {
           <div><Label tk={tk} isRTL={isRTL}>{tr.goalName}</Label><input type="text" value={name} onChange={e=>setName(e.target.value)} placeholder={tr.goalNamePh} className="w-full bg-transparent outline-none text-sm font-semibold mt-1" style={{ color:tk.INK }}/></div>
           <Divider tk={tk}/>
           <div className="grid grid-cols-2 gap-3">
-            <div><Label tk={tk} isRTL={isRTL}>{tr.target}</Label><input type="number" inputMode="decimal" value={target} onChange={e=>setTarget(e.target.value)} placeholder="0" className="w-full bg-transparent outline-none text-sm font-semibold mt-1" style={{ color:tk.INK, direction:'ltr', textAlign:isRTL?'right':'left', fontVariantNumeric:'tabular-nums' }}/></div>
-            {isEdit
-              ? <div><Label tk={tk} isRTL={isRTL}>{tr.saved}</Label><div className="text-sm font-bold mt-2" style={{ color:tk.EMERALD, fontVariantNumeric:'tabular-nums' }}>{fmtMAD(Number(initial?.saved)||0,lang)}</div><div style={{ color:tk.MUTED, fontSize:'0.6rem' }}>{lang==='ar'?'استخدم إيداع/سحب للتعديل':'Modifier via dépôt/retrait'}</div></div>
-              : <div><Label tk={tk} isRTL={isRTL}>{tr.saved}</Label><input type="number" inputMode="decimal" value={initSaved} onChange={e=>setInitSaved(e.target.value)} placeholder="0" className="w-full bg-transparent outline-none text-sm font-semibold mt-1" style={{ color:tk.INK, direction:'ltr', textAlign:isRTL?'right':'left', fontVariantNumeric:'tabular-nums' }}/></div>
-            }
+            {[[tr.target,target,setTarget],[tr.saved,saved,setSaved]].map(([l,v,fn])=><div key={l}><Label tk={tk} isRTL={isRTL}>{l}</Label><input type="number" inputMode="decimal" value={v} onChange={e=>fn(e.target.value)} placeholder="0" className="w-full bg-transparent outline-none text-sm font-semibold mt-1" style={{ color:tk.INK, direction:'ltr', textAlign:isRTL?'right':'left', fontVariantNumeric:'tabular-nums' }}/></div>)}
           </div>
           <Divider tk={tk}/>
           <div><Label tk={tk} isRTL={isRTL}>{tr.targetDateOpt}</Label><input type="date" value={targetDate} onChange={e=>setTargetDate(e.target.value)} className="w-full bg-transparent outline-none text-sm font-semibold mt-1" style={{ color:tk.INK, direction:'ltr' }}/></div>
         </div>
         <div className="flex gap-2">
           <button onClick={onCancel} className="flex-1 py-3 rounded-xl text-sm font-semibold" style={{ background:tk.BG_DEEP, color:tk.INK }}>{tr.cancel}</button>
-          <button onClick={()=>canSave&&onSave({id:initial?.id,name:name.trim(),iconId,target:parseFloat(target),saved:isEdit?(Number(initial?.saved)||0):(parseFloat(initSaved)||0),targetDate:targetDate||null})} disabled={!canSave} className="flex-[2] py-3 rounded-xl text-sm font-semibold" style={{ background:canSave?tk.EMERALD:tk.MUTED, color:tk.ON_EMERALD, opacity:canSave?1:0.5 }}>
+          <button onClick={()=>canSave&&onSave({id:initial?.id,name:name.trim(),iconId,target:parseFloat(target),saved:parseFloat(saved)||0,targetDate:targetDate||null})} disabled={!canSave} className="flex-[2] py-3 rounded-xl text-sm font-semibold" style={{ background:canSave?tk.EMERALD:tk.MUTED, color:tk.ON_EMERALD, opacity:canSave?1:0.5 }}>
             {initial?tr.save:tr.createGoal}
           </button>
         </div>
@@ -1757,7 +1773,7 @@ function TemplatesView({ tr, lang, isRTL, tokens, templates, setTemplates, onBac
   return (
     <>
       <header className="px-5 pt-6 pb-4 max-w-2xl mx-auto"><div className="flex items-center justify-between"><button onClick={onBack} className="p-2 rounded-full" style={{ background:tk.SURFACE, border:`1px solid ${tk.BORDER}`, color:tk.EMERALD }}>{isRTL?<ChevronRight className="w-4 h-4"/>:<ChevronLeft className="w-4 h-4"/>}</button><div style={{ fontFamily:tk.fontD, fontWeight:600, fontSize:'1.25rem', color:tk.EMERALD }}>{tr.templates}</div><div className="w-8"/></div></header>
-      <main className="px-5 max-w-2xl mx-auto" style={{ paddingBottom: "calc(env(safe-area-inset-bottom, 0px) + 7rem)" }}>
+      <main className="px-5 max-w-2xl mx-auto" style={{ paddingBottom:'calc(env(safe-area-inset-bottom, 0px) + 7rem)' }}>
         {templates.length===0
           ? <div className="rounded-2xl p-8 text-center mt-6" style={{ background:tk.SURFACE, border:`1px dashed ${tk.BORDER}` }}><Zap className="w-8 h-8 mx-auto mb-2" style={{ color:tk.GOLD }}/><div className="text-sm font-semibold" style={{ color:tk.INK, fontFamily:tk.fontD }}>{tr.noTemplates}</div><div className="text-xs mt-1" style={{ color:tk.MUTED }}>{tr.addTemplateHint}</div></div>
           : <div className="space-y-2">{templates.map(t=>{ const cat=getCat(t.category); const Icon=cat.icon; return (
@@ -1792,7 +1808,7 @@ function RecurringView({ tr, lang, isRTL, tokens, recurring, setRecurring, onBac
           <button onClick={()=>setEditing({})} className="p-2 rounded-full" style={{ background:tk.EMERALD, color:tk.ON_EMERALD }}><Plus className="w-4 h-4"/></button>
         </div>
       </header>
-      <main className="px-5 max-w-2xl mx-auto" style={{ paddingBottom: "calc(env(safe-area-inset-bottom, 0px) + 7rem)" }}>
+      <main className="px-5 max-w-2xl mx-auto" style={{ paddingBottom:'calc(env(safe-area-inset-bottom, 0px) + 7rem)' }}>
         <div className="rounded-xl p-3 mb-4 text-xs leading-relaxed" style={{ background:tk.SURFACE, border:`1px solid ${tk.BORDER}`, color:tk.MUTED }}>
           {lang==='ar'
             ? '💡 هذه هي مصاريفك الثابتة كل شهر. مجموعها يُطرح من راتبك في الرئيسية. عند حلول يوم الاستحقاق، تظهر في الرئيسية لتضيفها بنقرة واحدة وتُسجَّل في السجل.'
@@ -1850,60 +1866,111 @@ function RecurringModal({ tr, lang, isRTL, tokens, initial, onCancel, onSave }) 
   );
 }
 
-// ── Goal Link Modal (savings routine) ────────────────────
-function GoalLinkModal({ tr, lang, isRTL, tokens, goals, amount, onLink, onSkip }) {
-  const tk = tokens;
+// ── Custom Category Modal ─────────────────────────────────
+function CustomCatModal({ tr, lang, isRTL, tokens, type, onCancel, onSave }) {
+  const tk=tokens;
+  const [label,    setLabel]   = useState('');
+  const [iconName, setIconName]= useState('Package');
+  const [color,    setColor]   = useState(CUSTOM_COLORS[0]);
+  const [rule,     setRule]    = useState('wants');
+  const canSave = label.trim().length > 0;
+
+  const handleSave = () => {
+    if (!canSave) return;
+    onSave({ id:uid('cc'), type, label:label.trim(), iconName, color, rule:type==='expense'?rule:undefined });
+  };
+
+  const iconEntries = Object.entries(ICON_MAP);
+  const PreviewIcon = ICON_MAP[iconName] ?? Package;
+
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center p-4"
-      style={{ background: tk.OVERLAY }} onClick={onSkip}>
-      <div className="w-full max-w-md rounded-2xl p-5 space-y-4"
-        style={{ background: tk.BG, border: `1px solid ${tk.GOLD}60` }}
-        dir={isRTL ? 'rtl' : 'ltr'} onClick={e => e.stopPropagation()}>
-        <div className="flex items-center gap-3 mb-2">
-          <div className="w-11 h-11 rounded-2xl flex items-center justify-center flex-shrink-0"
-            style={{ background: tk.GOLD + '20' }}>
-            <PiggyBank className="w-5 h-5" style={{ color: tk.GOLD }}/>
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4"
+      style={{ background:tk.OVERLAY }} onClick={onCancel}>
+      <div className="w-full max-w-md rounded-2xl p-5 space-y-4 max-h-[90vh] overflow-y-auto"
+        style={{ background:tk.BG, border:`1px solid ${tk.BORDER}` }}
+        dir={isRTL?'rtl':'ltr'} onClick={e=>e.stopPropagation()}>
+
+        {/* Header */}
+        <div className="flex items-center justify-between">
+          <span style={{ fontFamily:tk.fontD, fontWeight:600, color:tk.INK }}>
+            {lang==='ar'?'فئة جديدة':'Nouvelle catégorie'}
+          </span>
+          <button onClick={onCancel} style={{ color:tk.MUTED }}><X className="w-4 h-4"/></button>
+        </div>
+
+        {/* Name */}
+        <div className="rounded-xl p-3" style={{ background:tk.SURFACE, border:`1px solid ${tk.BORDER}` }}>
+          <Label tk={tk} isRTL={isRTL}>{lang==='ar'?'الاسم':'Nom'}</Label>
+          <input type="text" value={label} onChange={e=>setLabel(e.target.value)} autoFocus
+            placeholder={lang==='ar'?'مثال: قهوة، تأمين…':'Ex : Café, Assurance…'}
+            className="w-full bg-transparent outline-none text-sm font-semibold mt-1.5"
+            style={{ color:tk.INK }}/>
+        </div>
+
+        {/* Icon picker */}
+        <div>
+          <Label tk={tk} isRTL={isRTL}>{lang==='ar'?'الأيقونة':'Icône'}</Label>
+          <div className="grid grid-cols-6 gap-2 mt-2 max-h-40 overflow-y-auto" style={{ scrollbarWidth:'none' }}>
+            {iconEntries.map(([name, Icon])=>(
+              <button key={name} onClick={()=>setIconName(name)}
+                className="p-2.5 rounded-xl flex items-center justify-center"
+                style={{ background:iconName===name?color:tk.SURFACE, border:`1px solid ${iconName===name?color:tk.BORDER}`, color:iconName===name?'#FFFDF8':tk.MUTED }}>
+                <Icon className="w-4 h-4"/>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Color picker */}
+        <div>
+          <Label tk={tk} isRTL={isRTL}>{lang==='ar'?'اللون':'Couleur'}</Label>
+          <div className="flex flex-wrap gap-2.5 mt-2">
+            {CUSTOM_COLORS.map(c=>(
+              <button key={c} onClick={()=>setColor(c)}
+                className="w-8 h-8 rounded-full flex-shrink-0"
+                style={{ background:c, outline:color===c?`3px solid ${tk.INK}`:'none', outlineOffset:'2px' }}/>
+            ))}
+          </div>
+        </div>
+
+        {/* Rule — expense only */}
+        {type==='expense' && (
+          <div>
+            <Label tk={tk} isRTL={isRTL}>{lang==='ar'?'نوع المصروف':'Type de dépense'}</Label>
+            <div className="grid grid-cols-2 gap-2 mt-2">
+              {[{id:'needs',ar:'ضروريات',fr:'Besoins'},{id:'wants',ar:'رغبات',fr:'Envies'}].map(r=>(
+                <button key={r.id} onClick={()=>setRule(r.id)} className="py-2.5 rounded-xl text-xs font-bold"
+                  style={{ background:rule===r.id?tk.EMERALD:tk.BG_DEEP, color:rule===r.id?tk.ON_EMERALD:tk.INK }}>
+                  {lang==='ar'?r.ar:r.fr}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Live preview */}
+        <div className="flex items-center gap-3 p-3 rounded-xl" style={{ background:tk.BG_DEEP }}>
+          <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background:color+'25' }}>
+            <PreviewIcon className="w-5 h-5" style={{ color }}/>
           </div>
           <div>
-            <div style={{ fontFamily: tk.fontD, fontWeight: 700, color: tk.INK }}>{tr.linkToGoal}</div>
-            <div style={{ color: tk.MUTED, fontSize: '0.72rem' }}>
-              {fmtMAD(amount, lang)} — {tr.linkGoalHint}
+            <div className="text-sm font-semibold" style={{ color:tk.INK }}>{label||'…'}</div>
+            <div className="text-[10px]" style={{ color:tk.MUTED }}>
+              {type==='expense'?(lang==='ar'?'مصروف':'Dépense'):(lang==='ar'?'دخل':'Revenu')}
+              {type==='expense'?' · '+(rule==='needs'?(lang==='ar'?'ضروري':'Besoin'):(lang==='ar'?'رغبة':'Envie')):''}
             </div>
           </div>
         </div>
-        <div className="space-y-2" style={{ maxHeight: '55dvh', overflowY: 'auto' }}>
-          {goals.length === 0
-            ? <div className="text-center py-6 text-sm" style={{ color: tk.MUTED }}>{tr.noGoalsYet}</div>
-            : goals.map(g => {
-              const ic = GOAL_ICONS[g.iconId] ?? GOAL_ICONS.other;
-              const Icon = ic.icon;
-              const pct = Goal.progress(g);
-              return (
-                <button key={g.id} onClick={() => onLink(g.id, amount)}
-                  className="w-full flex items-center gap-3 p-3 rounded-xl text-start"
-                  style={{ background: tk.SURFACE, border: `1px solid ${tk.BORDER}`, minHeight: 60 }}>
-                  <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
-                    style={{ background: ic.color + '15' }}>
-                    <Icon className="w-4 h-4" style={{ color: ic.color }}/>
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="text-sm font-bold truncate" style={{ color: tk.INK }}>{g.name}</div>
-                    <div className="h-1.5 rounded-full mt-1.5 overflow-hidden" style={{ background: tk.BG_DEEP }}>
-                      <div className="h-full rounded-full" style={{ width: `${pct}%`, background: ic.color }}/>
-                    </div>
-                  </div>
-                  <div style={{ color: ic.color, fontSize: '0.75rem', fontWeight: 700, flexShrink: 0 }}>
-                    {Math.round(pct)}%
-                  </div>
-                </button>
-              );
-            })
-          }
+
+        {/* Actions */}
+        <div className="flex gap-2">
+          <button onClick={onCancel} className="flex-1 py-3 rounded-xl text-sm font-semibold"
+            style={{ background:tk.BG_DEEP, color:tk.INK }}>{tr.cancel}</button>
+          <button onClick={handleSave} disabled={!canSave} className="flex-[2] py-3 rounded-xl text-sm font-semibold"
+            style={{ background:canSave?color:tk.MUTED, color:'#FFFDF8', opacity:canSave?1:0.5 }}>
+            {lang==='ar'?'إنشاء الفئة':'Créer la catégorie'}
+          </button>
         </div>
-        <button onClick={onSkip} className="w-full py-3 rounded-xl text-sm font-semibold"
-          style={{ background: tk.BG_DEEP, color: tk.MUTED, minHeight: 44 }}>
-          {tr.skipLink}
-        </button>
       </div>
     </div>
   );
