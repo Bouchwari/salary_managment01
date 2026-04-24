@@ -854,6 +854,7 @@ function Shell({ tokens, isRTL, theme, children }) {
     <div dir={isRTL ? 'rtl' : 'ltr'} className="w-full"
       style={{
         minHeight: '100dvh',
+        overflowX: 'hidden',
         background: tk.BG, color: tk.INK, fontFamily: tk.fontB,
         backgroundImage: theme === 'dark'
           ? `radial-gradient(circle at 20% 0%,${tk.EMERALD}18 0%,transparent 50%),radial-gradient(circle at 100% 100%,${tk.GOLD}10 0%,transparent 40%)`
