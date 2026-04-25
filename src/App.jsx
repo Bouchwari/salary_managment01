@@ -103,6 +103,11 @@ export const T = {
     projection:'توقع نهاية الشهر', projectionAt:'إذا استمريت بنفس الوتيرة',
     // Misc
     manage:'إدارة', theme:'السمة', darkMode:'داكن', lightMode:'فاتح',
+    allocateToGoal:'وفّرت هذا الشهر! هل تضيفه لهدف؟',
+    allocateBtn:'أضف لهدف', skipAlloc:'تخطى',
+    insightTopCat:'أكثر فئة صرفاً', insightOverspend:'تنبيه: صرفت',
+    insightSavings:'لديك متاح للادخار',
+    insightGoalTip:'أضف لأهدافك', addToGoals:'أضف للأهداف',
   },
   fr: {
     appName:'Mes Comptes', tagline:'Mes dépenses quotidiennes',
@@ -177,6 +182,11 @@ export const T = {
     ruleSavingsHint:"20% pour l'épargne", ruleTarget:'Cible', ruleActual:'Réel',
     projection:'Projection fin de mois', projectionAt:'À ce rythme',
     manage:'Gérer', theme:'Thème', darkMode:'Sombre', lightMode:'Clair',
+    allocateToGoal:'Épargne enregistrée ! L\'affecter à un objectif ?',
+    allocateBtn:'Affecter', skipAlloc:'Ignorer',
+    insightTopCat:'Catégorie principale', insightOverspend:'Attention : vous avez dépensé',
+    insightSavings:'Disponible pour épargner',
+    insightGoalTip:'Alimenter un objectif', addToGoals:'Ajouter aux objectifs',
   },
 };
 
@@ -190,6 +200,7 @@ export const CATEGORIES = [
   {id:'education',type:'expense', ar:'تعليم',   fr:'Éducation',    icon:BookOpen,     color:'#1D4ED8', rule:'needs'},
   {id:'shopping', type:'expense', ar:'تسوق',    fr:'Shopping',     icon:ShoppingBag,  color:'#BE185D', rule:'wants'},
   {id:'other',    type:'expense', ar:'أخرى',    fr:'Autres',       icon:Package,      color:'#78716C', rule:'wants'},
+  {id:'savings',  type:'expense', ar:'ادخار',   fr:'Épargne',      icon:PiggyBank,    color:'#059669', rule:'savings'},
   {id:'salary',   type:'income',  ar:'راتب',    fr:'Salaire',      icon:Briefcase,    color:'#0E4D3A'},
   {id:'freelance',type:'income',  ar:'عمل حر',  fr:'Indépendant',  icon:Laptop,       color:'#0369A1'},
   {id:'gift_inc', type:'income',  ar:'هدية',    fr:'Cadeau',       icon:Gift,         color:'#BE185D'},
@@ -500,6 +511,7 @@ export default function App() {
   const [salary,    setSalary]    = useState(0);
   const [paydayDay,  setPaydayDay]  = useState(0);
   const [customCats, setCustomCats] = useState([]);
+  const [savingsPrompt, setSavingsPrompt] = useState(null);
   const [loaded,    setLoaded]    = useState(false);
   const [editingEntry,  setEditingEntry]  = useState(null);
   const [prefillEntry,  setPrefillEntry]  = useState(null);
@@ -637,6 +649,9 @@ export default function App() {
     const { entry, updatedItem } = Recurring.apply(item, mk, todayISO());
     setEntries(prev => [entry, ...prev]);
     setRecurring(prev => prev.map(r => r.id === item.id ? updatedItem : r));
+    if (item.category === 'savings') {
+      setSavingsPrompt({ amount: item.amount, label: item.note || '' });
+    }
   }, []);
 
   const applyAllPending = useCallback(() => {
@@ -762,7 +777,7 @@ export default function App() {
             budgetAlerts={budgetAlerts} goals={goals}
             pendingRecurring={pendingRecurring}
             onApply={applyRecurringItem} onApplyAll={applyAllPending}
-            paydayCountdown={paydayCountdown}
+            paydayCountdown={paydayCountdown} savingsRate={savingsRate}
             setTab={setTab} setSubView={setSubView}
           />
         )}
@@ -831,6 +846,18 @@ export default function App() {
             else if (confirmAction.type === 'deleteGoal') deleteGoal(confirmAction.id);
             else clearAllData();
           }}
+        />
+      )}
+
+      {/* ── Savings allocation prompt ── */}
+      {savingsPrompt && (
+        <SavingsGoalPromptModal
+          tr={tr} lang={lang} isRTL={isRTL} tokens={tokens}
+          amount={savingsPrompt.amount}
+          goals={goals}
+          onClose={() => setSavingsPrompt(null)}
+          onAllocate={(goalId, amt) => { adjustGoalSaved(goalId, amt); setSavingsPrompt(null); }}
+          onNewGoal={() => { setSavingsPrompt(null); setSubView('goals'); }}
         />
       )}
 
@@ -942,7 +969,7 @@ function Confirm({ tokens, text, tr, onCancel, onConfirm }) {
 }
 
 // ── Home view ─────────────────────────────────────────────
-function HomeView({ tr, lang, isRTL, tokens, viewMonth, isCurrentMonth, shiftMonth, jumpToNow, expenseTotal, incomeTotal, salary, recurringTotal, disposable, remaining, dailyBudget, daysLeft, pctSpent, topCat, monthEntries, budgetAlerts, goals, pendingRecurring, onApply, onApplyAll, paydayCountdown, setTab, setSubView }) {
+function HomeView({ tr, lang, isRTL, tokens, viewMonth, isCurrentMonth, shiftMonth, jumpToNow, expenseTotal, incomeTotal, salary, recurringTotal, disposable, remaining, dailyBudget, daysLeft, pctSpent, topCat, monthEntries, budgetAlerts, goals, pendingRecurring, onApply, onApplyAll, paydayCountdown, savingsRate, setTab, setSubView }) {
   const tk = tokens;
   const hasSalary = salary > 0 || recurringTotal > 0;
 
@@ -1081,6 +1108,18 @@ function HomeView({ tr, lang, isRTL, tokens, viewMonth, isCurrentMonth, shiftMon
             </div>
           );})}</div>
         }
+        {/* Savings tip: show when there's money available */}
+        {remaining > 0 && goals.length > 0 && (
+          <div className="mt-3 flex items-center gap-2 px-3 py-2.5 rounded-xl" style={{ background: tk.OK, border: `1px solid #05966930` }}>
+            <PiggyBank className="w-3.5 h-3.5 flex-shrink-0" style={{ color: '#059669' }} />
+            <span className="text-[11px] flex-1 font-semibold" style={{ color: '#059669' }}>
+              {fmtMAD(remaining, lang)} {tr.insightSavings}
+            </span>
+            <button onClick={() => setSubView('goals')} className="text-[10px] font-bold px-2.5 py-1 rounded-lg" style={{ background: '#059669', color: '#FFFDF8' }}>
+              {tr.insightGoalTip}
+            </button>
+          </div>
+        )}
       </Card>
 
       {/* Budget alerts */}
@@ -1113,12 +1152,60 @@ function HomeView({ tr, lang, isRTL, tokens, viewMonth, isCurrentMonth, shiftMon
         }
       </div>
 
-      {/* Insight */}
-      <div className="rounded-2xl p-4 flex items-start gap-3"
-        style={{ background:`linear-gradient(135deg,${tk.GOLD}18,${tk.TERRA}10)`, border:`1px solid ${tk.GOLD}30` }}>
-        <Sparkles className="w-4 h-4 mt-0.5 flex-shrink-0" style={{ color:tk.GOLD }} />
-        <div><div className="text-xs font-bold mb-0.5" style={{ color:tk.INK }}>{tr.insight}</div><div className="text-xs leading-relaxed" style={{ color:tk.MUTED }}>{tr.keepTrack}</div></div>
-      </div>
+      {/* Dynamic insight */}
+      {(() => {
+        let icon = <Sparkles className="w-4 h-4 mt-0.5 flex-shrink-0" style={{ color: tk.GOLD }} />;
+        let title = tr.insight;
+        let body = tr.keepTrack;
+        let accent = tk.GOLD;
+        let bg = `linear-gradient(135deg,${tk.GOLD}18,${tk.TERRA}10)`;
+        let border = `${tk.GOLD}30`;
+
+        if (pctSpent >= 90 && daysLeft > 2) {
+          icon = <AlertTriangle className="w-4 h-4 mt-0.5 flex-shrink-0" style={{ color: tk.TERRA }} />;
+          title = tr.insightOverspend;
+          body = lang === 'ar'
+            ? `صرفت ${Math.round(pctSpent)}٪ من الميزانية ومازال ${daysLeft} يوم. حاول التوفير في ما تبقى.`
+            : `${Math.round(pctSpent)}% du budget dépensé et encore ${daysLeft} jours. Essayez de ralentir.`;
+          accent = tk.TERRA;
+          bg = `linear-gradient(135deg,${tk.TERRA}15,${tk.GOLD}08)`;
+          border = `${tk.TERRA}30`;
+        } else if (savingsRate >= 20 && salary > 0) {
+          icon = <TrendingUp className="w-4 h-4 mt-0.5 flex-shrink-0" style={{ color: tk.EMERALD }} />;
+          title = lang === 'ar' ? 'ممتاز!' : 'Excellent !';
+          body = lang === 'ar'
+            ? `معدل ادخارك ${Math.round(savingsRate)}٪ — أنت تتجاوز الهدف 20٪!`
+            : `Votre taux d'épargne est de ${Math.round(savingsRate)}% — vous dépassez l'objectif de 20% !`;
+          accent = tk.EMERALD;
+          bg = `linear-gradient(135deg,${tk.EMERALD}15,${tk.GOLD}08)`;
+          border = `${tk.EMERALD}30`;
+        } else if (topCat) {
+          const cat = getCat(topCat.id);
+          const catName = lang === 'ar' ? cat.ar : cat.fr;
+          body = lang === 'ar'
+            ? `${tr.insightTopCat}: ${catName} بـ ${fmtMAD(topCat.total, lang)}`
+            : `${tr.insightTopCat} : ${catName} (${fmtMAD(topCat.total, lang)})`;
+        } else if (remaining > 0 && goals.length > 0) {
+          icon = <PiggyBank className="w-4 h-4 mt-0.5 flex-shrink-0" style={{ color: '#059669' }} />;
+          title = tr.insightSavings;
+          body = lang === 'ar'
+            ? `لديك ${fmtMAD(remaining, lang)} متاحة — فكر في إضافتها لأهدافك!`
+            : `Vous avez ${fmtMAD(remaining, lang)} disponibles — pensez à alimenter vos objectifs !`;
+          accent = '#059669';
+          bg = `linear-gradient(135deg,${'#059669'}15,${tk.GOLD}08)`;
+          border = `${'#059669'}30`;
+        }
+
+        return (
+          <div className="rounded-2xl p-4 flex items-start gap-3" style={{ background: bg, border: `1px solid ${border}` }}>
+            {icon}
+            <div>
+              <div className="text-xs font-bold mb-0.5" style={{ color: tk.INK }}>{title}</div>
+              <div className="text-xs leading-relaxed" style={{ color: tk.MUTED }}>{body}</div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }
@@ -1372,6 +1459,19 @@ function StatsView({ tr, lang, isRTL, tokens, entries, monthEntries, expenseTota
     monthEntries.filter(e=>e.type==='expense').forEach(e=>{const d=new Date(e.date+'T00:00:00');arr[d.getDate()-1].value+=e.amount;});
     return arr.map(x=>({...x,value:Math.round(x.value)}));
   },[monthEntries,viewMonth]);
+  const avgDaily=daysElapsed>0?Math.round(expenseTotal/daysElapsed):0;
+  const maxDay=dailyData.reduce((m,d)=>d.value>m.value?d:m,{day:0,value:0});
+  const weekdayData=useMemo(()=>{
+    const days=lang==='ar'
+      ?['أحد','اثنين','ثلاثاء','أربعاء','خميس','جمعة','سبت']
+      :['Dim','Lun','Mar','Mer','Jeu','Ven','Sam'];
+    const sums=Array(7).fill(0); const counts=Array(7).fill(0);
+    monthEntries.filter(e=>e.type==='expense').forEach(e=>{
+      const d=new Date(e.date+'T00:00:00');
+      sums[d.getDay()]+=e.amount; counts[d.getDay()]++;
+    });
+    return days.map((name,i)=>({name,value:Math.round(sums[i])}));
+  },[monthEntries,lang]);
 
   return (
     <div className="space-y-5">
@@ -1468,9 +1568,34 @@ function StatsView({ tr, lang, isRTL, tokens, entries, monthEntries, expenseTota
 
       {/* Daily bar */}
       <Card tk={tk}>
-        <div className="text-xs font-bold mb-4" style={{ color:tk.INK, textTransform:isRTL?'none':'uppercase', letterSpacing:isRTL?0:'0.1em' }}>{tr.byDay}</div>
-        <div className="h-40" dir="ltr"><ResponsiveContainer width="100%" height="100%"><BarChart data={dailyData} margin={{top:5,right:5,left:5,bottom:5}}><XAxis dataKey="day" tick={{fill:tk.MUTED,fontSize:9}} axisLine={false} tickLine={false}/><YAxis hide/><Tooltip cursor={{fill:tk.BG_DEEP}} contentStyle={{background:tk.SURFACE,border:`1px solid ${tk.BORDER}`,borderRadius:8,fontSize:11,color:tk.INK}} formatter={v=>[`${v} DH`,'Total']}/><Bar dataKey="value" fill={tk.EMERALD} radius={[4,4,0,0]}/></BarChart></ResponsiveContainer></div>
+        <div className="flex items-center justify-between mb-4">
+          <span className="text-xs font-bold" style={{ color:tk.INK, textTransform:isRTL?'none':'uppercase', letterSpacing:isRTL?0:'0.1em' }}>{tr.byDay}</span>
+          <div className="flex items-center gap-3">
+            {avgDaily>0&&<span className="text-[10px] font-semibold px-2 py-0.5 rounded-full" style={{ background:tk.BG_DEEP, color:tk.MUTED }}>{lang==='ar'?'متوسط':'Moy.'}: {fmtMAD(avgDaily,lang)}</span>}
+            {maxDay.value>0&&<span className="text-[10px] font-semibold" style={{ color:tk.TERRA }}>↑ {tr.months[viewMonth.month].slice(0,3)} {maxDay.day}</span>}
+          </div>
+        </div>
+        <div className="h-40" dir="ltr"><ResponsiveContainer width="100%" height="100%"><BarChart data={dailyData} margin={{top:5,right:5,left:5,bottom:5}}><XAxis dataKey="day" tick={{fill:tk.MUTED,fontSize:9}} axisLine={false} tickLine={false}/><YAxis hide/><Tooltip cursor={{fill:tk.BG_DEEP}} contentStyle={{background:tk.SURFACE,border:`1px solid ${tk.BORDER}`,borderRadius:8,fontSize:11,color:tk.INK}} formatter={v=>[`${v} DH`,'Total']}/><Bar dataKey="value" fill={tk.EMERALD} radius={[4,4,0,0]} label={false}>
+          {dailyData.map((d,i)=><Cell key={i} fill={d.day===maxDay.day&&maxDay.value>0?tk.TERRA:tk.EMERALD}/>)}
+        </Bar></BarChart></ResponsiveContainer></div>
       </Card>
+
+      {/* Day of week pattern */}
+      {weekdayData.some(d=>d.value>0) && (
+        <Card tk={tk}>
+          <div className="text-xs font-bold mb-4" style={{ color:tk.INK, textTransform:isRTL?'none':'uppercase', letterSpacing:isRTL?0:'0.1em' }}>
+            {lang==='ar'?'الإنفاق حسب يوم الأسبوع':'Dépenses par jour de semaine'}
+          </div>
+          <div className="h-36" dir="ltr"><ResponsiveContainer width="100%" height="100%"><BarChart data={weekdayData} margin={{top:5,right:5,left:5,bottom:5}}><XAxis dataKey="name" tick={{fill:tk.MUTED,fontSize:10}} axisLine={false} tickLine={false}/><YAxis hide/><Tooltip cursor={{fill:tk.BG_DEEP}} contentStyle={{background:tk.SURFACE,border:`1px solid ${tk.BORDER}`,borderRadius:8,fontSize:11,color:tk.INK}} formatter={v=>[`${v} DH`,'']}/>
+            <Bar dataKey="value" radius={[4,4,0,0]}>
+              {weekdayData.map((d,i)=>{const mx=Math.max(...weekdayData.map(x=>x.value));return <Cell key={i} fill={d.value===mx&&mx>0?tk.TERRA:tk.EMERALD+99}/>;  })}
+            </Bar>
+          </BarChart></ResponsiveContainer></div>
+          <div className="text-[10px] text-center mt-1" style={{ color:tk.MUTED }}>
+            {lang==='ar'?'اليوم الأحمر = أكثر إنفاقاً':'La barre rouge = jour le plus dépensier'}
+          </div>
+        </Card>
+      )}
 
       {/* 6-month comparison */}
       <Card tk={tk}>
@@ -1763,6 +1888,79 @@ function AdjustModal({ tr, lang, tokens, mode, onCancel, onConfirm }) {
           <span style={{ color:tk.GOLD, fontFamily:tk.fontD, fontSize:'1.25rem', fontWeight:600 }}>{tr.mad}</span>
         </div>
         <div className="flex gap-2"><button onClick={onCancel} className="flex-1 py-3 rounded-xl text-sm font-semibold" style={{ background:tk.BG_DEEP, color:tk.INK }}>{tr.cancel}</button><button onClick={()=>can&&onConfirm(parseFloat(amt))} disabled={!can} className="flex-[2] py-3 rounded-xl text-sm font-semibold" style={{ background:can?(dep?tk.EMERALD:tk.TERRA):tk.MUTED, color:'#FFFDF8', opacity:can?1:0.5 }}>{tr.confirm}</button></div>
+      </div>
+    </div>
+  );
+}
+
+// ── Savings Goal Prompt Modal ─────────────────────────────
+function SavingsGoalPromptModal({ tr, lang, isRTL, tokens, amount, goals, onClose, onAllocate, onNewGoal }) {
+  const tk = tokens;
+  const [customAmt, setCustomAmt] = useState(amount.toString());
+  return (
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4" style={{ background: tk.OVERLAY }} onClick={onClose}>
+      <div className="w-full max-w-md rounded-2xl p-5 space-y-4 max-h-[85vh] overflow-y-auto" style={{ background: tk.BG, border: `1px solid ${tk.BORDER}` }} dir={isRTL ? 'rtl' : 'ltr'} onClick={e => e.stopPropagation()}>
+
+        {/* Header */}
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <div className="w-10 h-10 rounded-2xl flex items-center justify-center" style={{ background: '#059669' + '20' }}>
+              <PiggyBank className="w-5 h-5" style={{ color: '#059669' }} />
+            </div>
+            <div>
+              <div style={{ fontFamily: tk.fontD, fontWeight: 600, color: tk.INK, fontSize: '0.95rem' }}>{tr.allocateToGoal}</div>
+              <div className="text-[11px]" style={{ color: tk.MUTED }}>{fmtMAD(amount, lang)}</div>
+            </div>
+          </div>
+          <button onClick={onClose} style={{ color: tk.MUTED }}><X className="w-4 h-4" /></button>
+        </div>
+
+        {/* Custom amount input */}
+        <div className="rounded-xl p-3 flex items-baseline gap-2" style={{ background: tk.SURFACE, border: `1px solid ${tk.BORDER}` }}>
+          <input type="number" inputMode="decimal" value={customAmt} onChange={e => setCustomAmt(e.target.value)}
+            className="flex-1 bg-transparent outline-none text-2xl font-bold"
+            style={{ color: '#059669', fontFamily: tk.fontD, fontVariantNumeric: 'tabular-nums', direction: 'ltr', textAlign: isRTL ? 'right' : 'left' }} />
+          <span style={{ color: tk.GOLD, fontFamily: tk.fontD, fontWeight: 600 }}>{tr.mad}</span>
+        </div>
+
+        {/* Goals list */}
+        {goals.length > 0 ? (
+          <div className="space-y-2">
+            {goals.map(g => {
+              const ic = GOAL_ICONS[g.iconId] ?? GOAL_ICONS.other;
+              const Icon = ic.icon;
+              const pct = Goal.progress(g);
+              const complete = pct >= 100;
+              return (
+                <button key={g.id} disabled={complete}
+                  onClick={() => { const v = parseFloat(customAmt); if (v > 0) onAllocate(g.id, v); }}
+                  className="w-full flex items-center gap-3 p-3 rounded-xl text-start"
+                  style={{ background: tk.SURFACE, border: `1px solid ${complete ? tk.BORDER : ic.color + '50'}`, opacity: complete ? 0.5 : 1 }}>
+                  <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: ic.color + '15' }}>
+                    <Icon className="w-4 h-4" style={{ color: ic.color }} />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm font-semibold truncate" style={{ color: tk.INK }}>{g.name}</div>
+                    <div className="h-1.5 rounded-full overflow-hidden mt-1.5" style={{ background: tk.BG_DEEP }}>
+                      <div className="h-full rounded-full" style={{ width: `${pct}%`, background: complete ? tk.EMERALD : ic.color }} />
+                    </div>
+                  </div>
+                  <div className="text-[11px] font-bold flex-shrink-0" style={{ color: complete ? tk.EMERALD : tk.MUTED, fontVariantNumeric: 'tabular-nums' }}>
+                    {complete ? '✓' : `${Math.round(pct)}%`}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        ) : null}
+
+        {/* New goal + skip */}
+        <div className="flex gap-2 pt-1">
+          <button onClick={onClose} className="flex-1 py-3 rounded-xl text-sm font-semibold" style={{ background: tk.BG_DEEP, color: tk.INK }}>{tr.skipAlloc}</button>
+          <button onClick={onNewGoal} className="flex-1 py-3 rounded-xl text-sm font-semibold flex items-center justify-center gap-1.5" style={{ background: '#059669', color: '#FFFDF8' }}>
+            <Plus className="w-3.5 h-3.5" />{tr.newGoal}
+          </button>
+        </div>
       </div>
     </div>
   );
