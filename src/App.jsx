@@ -382,19 +382,25 @@ export const FinancialProfile = {
 
   /**
    * 50/30/20 rule breakdown
-   * Needs = bills category + recurring (fixed costs) + needs-tagged entries
-   * Wants = wants-tagged entries
+   * Needs = bills category + recurring (fixed costs) + needs-tagged VARIABLE entries
+   * Wants = wants-tagged VARIABLE entries
    * Savings = remaining after all
+   *
+   * FIX: Entries that were auto-created from a recurring item (have a recurringId)
+   * are already counted inside recurringTotal. We must exclude them from the
+   * per-category sums to prevent double-counting.
    */
   rule5030: (salary, recurringTotal, entries) => {
+    // Variable entries only — those NOT generated from a recurring template
+    const variable = entries.filter(e => !e.recurringId);
     const needs = recurringTotal +
-      entries.filter(e => e.type === 'expense' && getCat(e.category).rule === 'needs')
-             .reduce((s,e) => s + e.amount, 0);
+      variable.filter(e => e.type === 'expense' && getCat(e.category).rule === 'needs')
+              .reduce((s,e) => s + e.amount, 0);
     const wants =
-      entries.filter(e => e.type === 'expense' && getCat(e.category).rule === 'wants')
-             .reduce((s,e) => s + e.amount, 0);
-    const totalSpent = entries.filter(e => e.type === 'expense').reduce((s,e) => s + e.amount, 0);
-    const actualSavings = salary - recurringTotal - totalSpent;
+      variable.filter(e => e.type === 'expense' && getCat(e.category).rule === 'wants')
+              .reduce((s,e) => s + e.amount, 0);
+    const varSpent = variable.filter(e => e.type === 'expense').reduce((s,e) => s + e.amount, 0);
+    const actualSavings = salary - recurringTotal - varSpent;
     return {
       needs, wants, actualSavings,
       targets: { needs: salary * 0.5, wants: salary * 0.3, savings: salary * 0.2 },
@@ -432,13 +438,32 @@ const STORAGE_KEYS = {
   customCats: 'mca:custom_cats',
 };
 
+// Detect whether the Capacitor native storage bridge is available.
+// In a browser (Vite dev server / web testing) it won't exist, so we
+// fall back to localStorage so data persists across page reloads.
+const _isCapacitor = () =>
+  typeof window !== 'undefined' && window.storage != null;
+
 const Storage = {
   async load(key, fallback) {
-    try { const r = await window.storage.get(key); return r ? JSON.parse(r.value) : fallback; }
-    catch { return fallback; }
+    try {
+      if (_isCapacitor()) {
+        const r = await window.storage.get(key);
+        return r?.value ? JSON.parse(r.value) : fallback;
+      }
+      // Browser fallback — localStorage
+      const r = localStorage.getItem(key);
+      return r ? JSON.parse(r) : fallback;
+    } catch { return fallback; }
   },
   async save(key, value) {
-    try { await window.storage.set(key, JSON.stringify(value)); } catch {}
+    try {
+      if (_isCapacitor()) {
+        await window.storage.set(key, JSON.stringify(value));
+      } else {
+        localStorage.setItem(key, JSON.stringify(value));
+      }
+    } catch {}
   },
 };
 
@@ -584,17 +609,33 @@ export default function App() {
   );
   const expenseTotal   = useMemo(() => Entry.sumBy(monthEntries, 'expense'), [monthEntries]);
   const incomeTotal    = useMemo(() => Entry.sumBy(monthEntries, 'income'),  [monthEntries]);
-  const byCat          = useMemo(() => Entry.byCategory(monthEntries),       [monthEntries]);
-  const topCat         = useMemo(() => Entry.topCategory(byCat),             [byCat]);
   const recurringTotal = useMemo(() => Recurring.totalCost(recurring),       [recurring]);
+
+  // ── Bug fix: prevent double-counting of applied recurring items ──────────
+  // When a pending recurring is applied, it creates a real entry with a
+  // `recurringId` field. That recurring cost is already deducted via
+  // `recurringTotal`. If we also count it in `expenseTotal` we subtract it
+  // twice. We therefore compute a "variable-only" expense total that excludes
+  // these entries for all financial calculations.
+  const recurringIdSet  = useMemo(() => new Set(recurring.map(r => r.id)), [recurring]);
+  const varMonthEntries = useMemo(
+    () => monthEntries.filter(e => !e.recurringId || !recurringIdSet.has(e.recurringId)),
+    [monthEntries, recurringIdSet]
+  );
+  const varExpenseTotal = useMemo(() => Entry.sumBy(varMonthEntries, 'expense'), [varMonthEntries]);
+  // byCat uses variable-only entries so budget alerts and pie chart
+  // don't double-count costs already represented in recurringTotal.
+  const byCat           = useMemo(() => Entry.byCategory(varMonthEntries), [varMonthEntries]);
+  const topCat          = useMemo(() => Entry.topCategory(byCat),          [byCat]);
 
   const effectiveSalary = salary > 0 ? salary : incomeTotal;
   const disposable      = FinancialProfile.disposable(effectiveSalary, recurringTotal);
-  const remaining       = FinancialProfile.remaining(disposable, expenseTotal);
+  // Use variable-only expenses so recurring is not deducted twice
+  const remaining       = FinancialProfile.remaining(disposable, varExpenseTotal);
   const savingsRate     = FinancialProfile.savingsRate(effectiveSalary, remaining);
   const dailyBudget     = FinancialProfile.dailyBudget(remaining, daysLeft);
-  const pctSpent        = disposable > 0 ? Math.min((expenseTotal / disposable) * 100, 100) : 0;
-  const projection      = Entry.monthProjection(expenseTotal, daysElapsed, daysInMonth);
+  const pctSpent        = disposable > 0 ? Math.min((varExpenseTotal / disposable) * 100, 100) : 0;
+  const projection      = Entry.monthProjection(varExpenseTotal, daysElapsed, daysInMonth);
   const projectedLeft   = disposable - projection;
 
   const rule5030 = useMemo(
@@ -617,7 +658,15 @@ export default function App() {
   // ── Application use-cases (commands) ──
   const addOrUpdateEntry = useCallback((data) => {
     const { _rec, saveTemplate, ...entryFields } = data;
-    const entry = Entry.make({ ...entryFields, id: editingEntry?.id ?? uid('e') });
+    // Bug fix: preserve the recurringId link when editing an entry that was
+    // auto-generated from a recurring item. Without this, the entry loses its
+    // association and would be counted as a variable expense, re-introducing
+    // the double-count bug for edited entries.
+    const entry = Entry.make({
+      ...entryFields,
+      id: editingEntry?.id ?? uid('e'),
+      ...(editingEntry?.recurringId ? { recurringId: editingEntry.recurringId } : {}),
+    });
     setEntries(prev => {
       const rest = editingEntry ? prev.filter(x => x.id !== editingEntry.id) : prev;
       return [entry, ...rest];
@@ -768,7 +817,7 @@ export default function App() {
           <HomeView {...ctx}
             viewMonth={viewMonth} isCurrentMonth={isCurrentMonth}
             shiftMonth={shiftMonth} jumpToNow={jumpToNow}
-            expenseTotal={expenseTotal} incomeTotal={incomeTotal}
+            expenseTotal={expenseTotal} varExpenseTotal={varExpenseTotal} incomeTotal={incomeTotal}
             salary={salary} recurringTotal={recurringTotal}
             disposable={disposable} remaining={remaining}
             dailyBudget={dailyBudget} daysLeft={daysLeft}
@@ -969,7 +1018,7 @@ function Confirm({ tokens, text, tr, onCancel, onConfirm }) {
 }
 
 // ── Home view ─────────────────────────────────────────────
-function HomeView({ tr, lang, isRTL, tokens, viewMonth, isCurrentMonth, shiftMonth, jumpToNow, expenseTotal, incomeTotal, salary, recurringTotal, disposable, remaining, dailyBudget, daysLeft, pctSpent, topCat, monthEntries, budgetAlerts, goals, pendingRecurring, onApply, onApplyAll, paydayCountdown, savingsRate, setTab, setSubView }) {
+function HomeView({ tr, lang, isRTL, tokens, viewMonth, isCurrentMonth, shiftMonth, jumpToNow, expenseTotal, varExpenseTotal, incomeTotal, salary, recurringTotal, disposable, remaining, dailyBudget, daysLeft, pctSpent, topCat, monthEntries, budgetAlerts, goals, pendingRecurring, onApply, onApplyAll, paydayCountdown, savingsRate, setTab, setSubView }) {
   const tk = tokens;
   const hasSalary = salary > 0 || recurringTotal > 0;
 
@@ -1004,9 +1053,9 @@ function HomeView({ tr, lang, isRTL, tokens, viewMonth, isCurrentMonth, shiftMon
             {/* Breakdown row */}
             <div className="grid grid-cols-3 gap-2 mt-5 pt-4" style={{ borderTop:'1px solid rgba(255,253,248,0.15)' }}>
               {[
-                [tr.salary_label,   fmtShort(salary||incomeTotal, lang)],
-                [`− ${tr.fixed_label}`,  fmtShort(recurringTotal, lang)],
-                [`− ${tr.variable_label}`,fmtShort(expenseTotal,  lang)],
+                [tr.salary_label,          fmtShort(salary||incomeTotal, lang)],
+                [`− ${tr.fixed_label}`,    fmtShort(recurringTotal,      lang)],
+                [`− ${tr.variable_label}`, fmtShort(varExpenseTotal,     lang)],
               ].map(([label, value]) => (
                 <div key={label}>
                   <div style={{ fontSize:'0.6rem', opacity:0.7, textTransform:isRTL?'none':'uppercase', letterSpacing:isRTL?0:'0.08em' }}>{label}</div>
@@ -1074,15 +1123,29 @@ function HomeView({ tr, lang, isRTL, tokens, viewMonth, isCurrentMonth, shiftMon
           <div className="space-y-2">
             {pendingRecurring.map(r => {
               const cat = getCat(r.category); const Icon = cat.icon;
+              // Overdue: the due day has already passed this month
+              const todayDay = new Date().getDate();
+              const isOverdue = todayDay > r.dayOfMonth;
               return (
                 <div key={r.id} className="flex items-center gap-3 py-1">
                   <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ background:cat.color+'20' }}><Icon className="w-3.5 h-3.5" style={{ color:cat.color }} /></div>
                   <div className="flex-1 min-w-0">
                     <div className="text-sm font-semibold truncate" style={{ color:tk.INK }}>{r.note||(lang==='ar'?cat.ar:cat.fr)}</div>
-                    <div className="text-[10px]" style={{ color:tk.MUTED }}>{tr.dueDay} {r.dayOfMonth}</div>
+                    <div className="flex items-center gap-1.5 text-[10px]" style={{ color: isOverdue ? tk.TERRA : tk.MUTED }}>
+                      {isOverdue && <AlertTriangle className="w-2.5 h-2.5" />}
+                      {tr.dueDay} {r.dayOfMonth}
+                      {isOverdue && (
+                        <span className="font-bold" style={{ color: tk.TERRA }}>
+                          {lang === 'ar' ? '· متأخر' : '· en retard'}
+                        </span>
+                      )}
+                    </div>
                   </div>
                   <div className="text-sm font-bold" style={{ color:tk.INK, fontVariantNumeric:'tabular-nums' }}>{fmtMAD(r.amount,lang)}</div>
-                  <button onClick={() => onApply(r)} className="p-1.5 rounded-lg" style={{ background:tk.EMERALD, color:tk.ON_EMERALD }}><Check className="w-3.5 h-3.5" /></button>
+                  <button onClick={() => onApply(r)} className="p-1.5 rounded-lg"
+                    style={{ background: isOverdue ? tk.TERRA : tk.EMERALD, color:tk.ON_EMERALD }}>
+                    <Check className="w-3.5 h-3.5" />
+                  </button>
                 </div>
               );
             })}
