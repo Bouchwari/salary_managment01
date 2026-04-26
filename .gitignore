@@ -1,0 +1,28 @@
+# Dependencies
+node_modules/
+
+# Build output (rebuilt by CI)
+dist/
+
+# Android build caches
+android/.gradle/
+android/app/build/
+android/build/
+
+# Local env / secrets
+.env
+.env.local
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+
+# Claude Code local settings (keep .claude/settings.json if needed, but not memory)
+.claude/
